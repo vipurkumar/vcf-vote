@@ -110,7 +110,7 @@ fn platform_chrome_candidates() -> Vec<String> {
 /// Launch a headed (visible) Chromium browser and return the Browser handle + first page.
 pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Error>> {
     let mut builder = BrowserConfig::builder();
-    builder = builder.window_size(1280, 900);
+    builder = builder.with_head().window_size(1280, 900);
 
     // Platform-specific Chrome flags
     #[cfg(target_os = "linux")]
