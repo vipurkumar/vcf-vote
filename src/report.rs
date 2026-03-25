@@ -23,7 +23,6 @@ pub fn write_csv(results: &[VoteResult], path: &str) -> Result<(), Box<dyn std::
 }
 
 /// Print a markdown summary of results to stdout.
-#[allow(dead_code)]
 pub fn print_summary(results: &[VoteResult]) {
     let total = results.len();
     let voted = results.iter().filter(|r| matches!(r.status, VoteStatus::Voted)).count();

@@ -4,9 +4,9 @@
 
 ---
 
-> **Origin Story:** Someone on the team forwarded an email: *"Hey, can everyone register and upvote these 5 VCF feature requests?"* A normal person would have spent 3 minutes clicking buttons. Instead, we spent a weekend building a full terminal UI with animated borders, progress bars, and a modal dialog system. In Rust. Because of course we did.
+> **Origin Story:** Someone on the team forwarded an email: *"Hey, can everyone register and upvote these 5 VCF feature requests?"* A normal person would have spent 3 minutes clicking buttons. Instead, we spent a weekend building a CLI tool to automate it. In Rust. Because of course we did.
 >
-> What started as *"I'll just automate this real quick"* turned into a full-blown TUI application with cross-platform Chrome detection, proxy vote support, and more error handling than the actual voting portal probably has.
+> What started as *"I'll just automate this real quick"* turned into a full-blown CLI application with cross-platform Chrome detection, proxy vote support, and more error handling than the actual voting portal probably has.
 >
 > Was it worth it? Absolutely not. Would we do it again? Already planning v2.
 
@@ -14,7 +14,7 @@
 
 ## What Is This?
 
-A **human-in-the-loop** terminal application that helps you navigate and upvote VMware Cloud Foundation (VCF) feature requests on [Broadcom's Aha! Ideas portal](https://vcf.ideas.aha.io). It opens a real browser, you log in like a normal human being, and then it clicks the vote buttons for you while you watch a very satisfying progress bar fill up.
+A **human-in-the-loop** CLI tool that helps you navigate and upvote VMware Cloud Foundation (VCF) feature requests on [Broadcom's Aha! Ideas portal](https://vcf.ideas.aha.io). It opens a real browser, you log in like a normal human being, and then it clicks the vote buttons for you.
 
 **It does NOT:**
 - Store your credentials (we're not animals)
@@ -26,42 +26,6 @@ A **human-in-the-loop** terminal application that helps you navigate and upvote 
 - Look really cool in your terminal
 - Generate a CSV report so you can prove to management that you voted
 - Make you mass-upvote VMware feature requests like a civic duty
-
----
-
-## Screenshots
-
-**TUI Mode** — because plain text is for quitters:
-
-```
-╭──────────────────────────────────────────────────────────────────╮
-│ VCF VOTING ASSISTANT   VOTING   DRY RUN   ING    01:23          │
-╰──────────────────────────────────────────────────────────────────╯
-╭─ Feature Requests ──────────────────╮╭─ Activity Log ───────────────╮
-│    FR ID          STATUS  MESSAGE   ││ [00:05] Launching browser... │
-│ OK VCF-I-979      VOTED   vote cli  ││ [00:12] Auth check passed    │
-│ OK VCF-I-3704     VOTED   vote cli  ││ [00:15] Processing FR 1/5    │
-│ >> VCF-I-3707     WORKING           ││ [00:23] VCF-I-979 -> voted   │
-│    VCF-I-2188     PENDING           ││ [00:31] VCF-I-3704 -> voted  │
-│    VCF-I-3659     PENDING           ││ [00:38] Processing FR 3/5    │
-╰─────────────────────────────────────╯╰──────────────────────────────╯
-╭─ Progress ───────────────────────────────────────────────────────╮
-│ ████████████████████░░░░░░░░░░░░░░░░░░░░  2/5 FRs processed     │
-╰──────────────────────────────────────────────────────────────────╯
- [Ctrl+C] Quit  |  [ENTER] Confirm action
-```
-
-**Modal Dialogs** — because we take consent seriously:
-
-```
-╔══════════════════ ACTION REQUIRED ═══════════════════╗
-║                                                       ║
-║   About to click Vote on VCF-I-3707.                 ║
-║   Confirm you want to proceed.                        ║
-║                                                       ║
-║            [ ENTER ] Continue                         ║
-╚═══════════════════════════════════════════════════════╝
-```
 
 ---
 
@@ -151,9 +115,9 @@ cargo run --release -- --ids VCF-I-979,VCF-I-3704,VCF-I-3707,VCF-I-2188,VCF-I-36
 ```
 
 Here's what happens:
-1. A fancy disclaimer screen appears. Press **ENTER** to accept.
+1. A disclaimer prompt appears. Press **ENTER** to accept.
 2. Chrome opens to the Aha! portal.
-3. A modal says **"Please sign in"** — go to the browser, log in, handle any 2FA/CAPTCHA.
+3. A prompt says **"Please sign in"** — go to the browser, log in, handle any 2FA/CAPTCHA.
 4. Press **ENTER** in the terminal when you're logged in.
 5. The tool navigates to each feature request page.
 6. In dry-run mode, it checks if the Vote button exists and reports back.
@@ -191,14 +155,6 @@ cargo run --release -- \
 
 This opens the Broadcom registration page first, waits for you to create an account, then proceeds to the portal.
 
-### Plain Text Mode (No TUI)
-
-If your terminal doesn't support the TUI, or you prefer plain output:
-
-```bash
-cargo run --release -- --ids VCF-I-979,VCF-I-3704 --no-tui
-```
-
 ### Custom Chrome Path
 
 If Chrome isn't auto-detected:
@@ -231,7 +187,6 @@ Options:
       --company <COMPANY>    Company name for proxy vote
       --use-case <USE_CASE>  Use case summary for proxy vote
       --output <OUTPUT>      CSV report path [default: vcf_votes_report.csv]
-      --no-tui               Disable TUI, use plain text output
   -h, --help                 Print help
 ```
 
@@ -297,17 +252,14 @@ cargo test -- --nocapture
 ```
 main.rs
   |
-  +---> TUI render loop (ratatui + crossterm)
-  |       Draws UI at 50ms ticks, handles keyboard
-  |
-  +---> Async worker (tokio)
+  +---> Async runtime (tokio)
           |
           +---> browser.rs  — launches Chrome via CDP (chromiumoxide)
           +---> voter.rs    — navigates to FR pages, finds vote buttons via JS
           +---> report.rs   — writes CSV + prints summary
 ```
 
-The TUI and worker run concurrently via `tokio::select!`, sharing state through `Arc<Mutex<AppState>>`. Human-in-the-loop pauses work by: the worker sets `state.modal`, the TUI renders an overlay, and the worker polls `state.modal_confirmed` until the user presses ENTER.
+The async worker manages state through `Arc<Mutex<AppState>>`. Human-in-the-loop pauses work by prompting in the terminal and waiting for the user to press ENTER before proceeding.
 
 Vote buttons are found using JavaScript evaluation — querying `button, a, [role="button"]` elements by text content. The selectors may need updating if the Aha! portal changes its UI.
 
@@ -336,7 +288,7 @@ Use responsibly and in accordance with the portal's Terms of Use.
 
 ## License
 
-MIT — do whatever you want with it. If you end up building a TUI for *your* team's internal voting chore, we'd love to hear about it.
+MIT — do whatever you want with it. If you end up building a CLI for *your* team's internal voting chore, we'd love to hear about it.
 
 ---
 

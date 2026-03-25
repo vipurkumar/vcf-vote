@@ -1,11 +1,23 @@
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::NavigateParams;
 use chromiumoxide::page::Page;
 use futures::StreamExt;
 use std::io::{self, Write};
 use std::time::Duration;
 
 use crate::config::{Config, Mode, PORTAL_URL, REGISTRATION_URL};
-use crate::tui::SharedState;
+
+/// Navigate to a URL without waiting for full page load.
+/// Sends the CDP navigate command with a timeout, then waits briefly for content.
+pub async fn navigate(page: &Page, url: &str) {
+    let params = NavigateParams::new(url);
+    let _ = tokio::time::timeout(
+        Duration::from_secs(10),
+        page.execute(params),
+    ).await;
+    // Give the page a moment to start loading
+    tokio::time::sleep(Duration::from_secs(3)).await;
+}
 
 /// Print a message and wait for the human to press ENTER.
 pub fn human_pause(message: &str) {
@@ -16,29 +28,6 @@ pub fn human_pause(message: &str) {
     io::stderr().flush().ok();
     let mut buf = String::new();
     io::stdin().read_line(&mut buf).ok();
-}
-
-/// TUI-aware version of `human_pause`: sets a modal on the shared TUI state
-/// and waits for the user to press ENTER in the TUI.
-pub async fn human_pause_tui(state: &SharedState, message: &str) {
-    {
-        let mut s = state.lock().unwrap();
-        s.modal = Some(message.to_string());
-        s.modal_confirmed = false;
-    }
-
-    loop {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let confirmed = state.lock().unwrap().modal_confirmed;
-        if confirmed {
-            break;
-        }
-    }
-
-    {
-        let mut s = state.lock().unwrap();
-        s.modal = None;
-    }
 }
 
 /// Find Chrome/Chromium executable, checking CHROME_PATH env var then platform defaults.
@@ -142,13 +131,6 @@ pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Err
         .build()
         .map_err(|e| format!("Failed to build browser config: {}", e))?;
 
-    // On macOS, raw terminal mode can interfere with Chrome process spawning.
-    // Temporarily disable it for the launch, then re-enable.
-    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-    if was_raw {
-        let _ = crossterm::terminal::disable_raw_mode();
-    }
-
     // Launch with a timeout to avoid hanging forever
     let launch_result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -158,11 +140,6 @@ pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Err
     .map_err(|_| "Browser launch timed out after 30 seconds")?;
 
     let (browser, mut handler) = launch_result?;
-
-    // Restore raw mode if it was active
-    if was_raw {
-        let _ = crossterm::terminal::enable_raw_mode();
-    }
 
     // Spawn the handler loop so CDP messages are processed
     tokio::spawn(async move {
@@ -184,14 +161,10 @@ pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Err
 
 /// Handle the authentication gate: open portal (and registration page if needed),
 /// then pause for the human to sign in.
-#[allow(dead_code)]
 pub async fn auth_gate(page: &Page, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     if config.mode == Mode::RegisterAndVote {
         eprintln!("[auth] Opening registration page: {}", REGISTRATION_URL);
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            page.goto(REGISTRATION_URL),
-        ).await;
+        navigate(page, REGISTRATION_URL).await;
         human_pause(
             "Please complete your Broadcom account registration.\n\
              Fill in all required fields and verify your email.\n\
@@ -200,10 +173,7 @@ pub async fn auth_gate(page: &Page, config: &Config) -> Result<(), Box<dyn std::
     }
 
     eprintln!("[auth] Opening VCF Ideas portal: {}", PORTAL_URL);
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        page.goto(PORTAL_URL),
-    ).await;
+    navigate(page, PORTAL_URL).await;
     human_pause(
         "Please sign in to the Aha! Ideas portal.\n\
          Complete any 2FA or CAPTCHA challenges.\n\
@@ -218,71 +188,6 @@ pub async fn auth_gate(page: &Page, config: &Config) -> Result<(), Box<dyn std::
         human_pause("Verify you are logged in, then press ENTER to continue anyway.");
     } else {
         eprintln!("[auth] Auth check passed — no sign-in prompt detected.");
-    }
-
-    Ok(())
-}
-
-/// TUI-aware version of `auth_gate`: uses the TUI modal for human interaction
-/// and logs messages to the shared TUI state instead of stderr.
-pub async fn auth_gate_tui(
-    page: &Page,
-    config: &Config,
-    state: &SharedState,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if config.mode == Mode::RegisterAndVote {
-        state.lock().unwrap().log(format!(
-            "[auth] Opening registration page: {}",
-            REGISTRATION_URL
-        ));
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            page.goto(REGISTRATION_URL),
-        ).await;
-        human_pause_tui(
-            state,
-            "Please complete your Broadcom account registration.\n\
-             Fill in all required fields and verify your email.\n\
-             Once registration is complete, press ENTER.",
-        )
-        .await;
-    }
-
-    state.lock().unwrap().log(format!(
-        "[auth] Opening VCF Ideas portal: {}",
-        PORTAL_URL
-    ));
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        page.goto(PORTAL_URL),
-    ).await;
-    human_pause_tui(
-        state,
-        "Please sign in to the Aha! Ideas portal.\n\
-         Complete any 2FA or CAPTCHA challenges.\n\
-         Once you see your user menu/avatar, press ENTER.",
-    )
-    .await;
-
-    // Basic auth verification: check for absence of common sign-in indicators
-    let html = page.content().await.unwrap_or_default();
-    if html.to_lowercase().contains("sign in") || html.to_lowercase().contains("log in") {
-        state.lock().unwrap().log(
-            "[auth] WARNING: Page still appears to show a sign-in prompt.".to_string(),
-        );
-        state.lock().unwrap().log(
-            "[auth] If you are actually logged in, this may be a false positive.".to_string(),
-        );
-        human_pause_tui(
-            state,
-            "Verify you are logged in, then press ENTER to continue anyway.",
-        )
-        .await;
-    } else {
-        state
-            .lock()
-            .unwrap()
-            .log("[auth] Auth check passed — no sign-in prompt detected.".to_string());
     }
 
     Ok(())

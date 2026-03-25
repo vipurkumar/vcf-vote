@@ -57,9 +57,6 @@ pub struct Cli {
     #[arg(long, default_value = "vcf_votes_report.csv")]
     pub output: String,
 
-    /// Disable the TUI and use plain text output (for non-interactive terminals)
-    #[arg(long, default_value_t = false)]
-    pub no_tui: bool,
 }
 
 #[derive(Debug)]
@@ -70,7 +67,6 @@ pub struct Config {
     pub company: Option<String>,
     pub use_case: Option<String>,
     pub output_path: String,
-    pub no_tui: bool,
 }
 
 pub const PORTAL_URL: &str = "https://vcf.ideas.aha.io";
@@ -100,7 +96,6 @@ impl Config {
             company: cli.company,
             use_case: cli.use_case,
             output_path: cli.output,
-            no_tui: cli.no_tui,
         })
     }
 
@@ -163,14 +158,12 @@ mod tests {
             company: None,
             use_case: None,
             output: "test.csv".into(),
-            no_tui: false,
         };
         let config = Config::from_cli(cli).unwrap();
         assert_eq!(config.fr_ids, vec!["VCF-I-979".to_string()]);
         assert_eq!(config.mode, Mode::VoteOnly);
         assert!(config.dry_run);
         assert_eq!(config.output_path, "test.csv");
-        assert!(!config.no_tui);
     }
 
     #[test]
@@ -183,7 +176,6 @@ mod tests {
             company: None,
             use_case: None,
             output: "test.csv".into(),
-            no_tui: false,
         };
         let err = Config::from_cli(cli).unwrap_err();
         assert!(err.contains("No feature request IDs"), "Expected error about empty IDs, got: {}", err);
@@ -199,7 +191,6 @@ mod tests {
             company: None,
             use_case: None,
             output: "test.csv".into(),
-            no_tui: false,
         };
         let err = Config::from_cli(cli).unwrap_err();
         assert!(err.contains("Invalid FR ID"), "Expected error about invalid ID, got: {}", err);
@@ -215,7 +206,6 @@ mod tests {
             company: None,
             use_case: None,
             output: "test.csv".into(),
-            no_tui: false,
         };
         let config = Config::from_cli(cli).unwrap();
         assert!(!config.dry_run, "live=true should override dry_run to false");
@@ -231,7 +221,6 @@ mod tests {
             company: Some("ING".into()),
             use_case: Some("test".into()),
             output: "test.csv".into(),
-            no_tui: false,
         };
         let config = Config::from_cli(cli).unwrap();
         assert_eq!(config.company, Some("ING".to_string()));
