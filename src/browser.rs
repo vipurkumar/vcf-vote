@@ -188,7 +188,10 @@ pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Err
 pub async fn auth_gate(page: &Page, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     if config.mode == Mode::RegisterAndVote {
         eprintln!("[auth] Opening registration page: {}", REGISTRATION_URL);
-        page.goto(REGISTRATION_URL).await?;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            page.goto(REGISTRATION_URL),
+        ).await;
         human_pause(
             "Please complete your Broadcom account registration.\n\
              Fill in all required fields and verify your email.\n\
@@ -197,7 +200,10 @@ pub async fn auth_gate(page: &Page, config: &Config) -> Result<(), Box<dyn std::
     }
 
     eprintln!("[auth] Opening VCF Ideas portal: {}", PORTAL_URL);
-    page.goto(PORTAL_URL).await?;
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        page.goto(PORTAL_URL),
+    ).await;
     human_pause(
         "Please sign in to the Aha! Ideas portal.\n\
          Complete any 2FA or CAPTCHA challenges.\n\
@@ -229,7 +235,10 @@ pub async fn auth_gate_tui(
             "[auth] Opening registration page: {}",
             REGISTRATION_URL
         ));
-        page.goto(REGISTRATION_URL).await?;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            page.goto(REGISTRATION_URL),
+        ).await;
         human_pause_tui(
             state,
             "Please complete your Broadcom account registration.\n\
@@ -243,7 +252,10 @@ pub async fn auth_gate_tui(
         "[auth] Opening VCF Ideas portal: {}",
         PORTAL_URL
     ));
-    page.goto(PORTAL_URL).await?;
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        page.goto(PORTAL_URL),
+    ).await;
     human_pause_tui(
         state,
         "Please sign in to the Aha! Ideas portal.\n\

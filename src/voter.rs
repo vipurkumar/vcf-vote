@@ -48,7 +48,11 @@ pub async fn vote_one(
 
     eprintln!("[vote] Navigating to {} ...", url);
 
-    if let Err(e) = page.goto(&url).await {
+    let goto_result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        page.goto(&url),
+    ).await;
+    if let Err(e) = goto_result.map_err(|_| "Navigation timed out".to_string()).and_then(|r| r.map_err(|e| e.to_string())) {
         return VoteResult {
             fr_id: fr_id.to_string(),
             url,
@@ -358,7 +362,11 @@ pub async fn vote_one_tui(
         s.log(format!("[vote] Navigating to {} ...", url));
     }
 
-    if let Err(e) = page.goto(&url).await {
+    let goto_result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        page.goto(&url),
+    ).await;
+    if let Err(e) = goto_result.map_err(|_| "Navigation timed out".to_string()).and_then(|r| r.map_err(|e| e.to_string())) {
         let result = VoteResult {
             fr_id: fr_id.to_string(),
             url,
