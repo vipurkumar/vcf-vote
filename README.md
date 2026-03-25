@@ -275,6 +275,137 @@ The vote button detection in `src/voter.rs` uses placeholder selectors. After yo
 
 ---
 
+## Proxy Vote Setup Guide
+
+The `--company` and `--use-case` flags enable proxy voting — voting on behalf of your organization with a reason attached. Out of the box, the proxy selectors are **placeholders** and will likely report `proxy fields not found`. Here's how to make them work for your portal.
+
+### Why Proxy Votes Need Custom Selectors
+
+The Aha! Ideas portal's proxy vote UI varies by configuration. The tool uses JavaScript to find buttons and form fields by their **text content** and **labels**. Since every portal instance can have different button labels, field names, and dialog structures, you need to inspect yours once and update the selectors.
+
+### Step-by-Step: Updating Proxy Vote Selectors
+
+#### 1. Open a Feature Request in Chrome
+
+Navigate to any FR page while logged in, e.g.:
+```
+https://vcf.ideas.aha.io/ideas/VCF-I-979
+```
+
+#### 2. Find the Proxy Vote Button
+
+Look for a button that opens a proxy vote dialog. Common labels:
+- "Vote on behalf of..."
+- "Add proxy vote"
+- "Add details"
+- "Vote for a customer"
+
+Right-click it → **Inspect**. Note the exact text content.
+
+#### 3. Update `js_open` in `attempt_proxy_vote()`
+
+Open `src/voter.rs` and find the `attempt_proxy_vote` function (~line 218). Update the `js_open` block to match your button's text:
+
+```javascript
+// Current placeholder — update the text matches:
+if (text.includes('proxy') || text.includes('add details') || text.includes('on behalf')) {
+    btn.click();
+    return true;
+}
+```
+
+Change the strings to match what you found. For example, if the button says "Vote for a customer":
+
+```javascript
+if (text.includes('vote for a customer')) {
+    btn.click();
+    return true;
+}
+```
+
+#### 4. Find the Form Fields
+
+After clicking the proxy button, a dialog should open with input fields. Inspect each field and note its:
+- `aria-label` attribute
+- `placeholder` attribute
+- `name` attribute
+
+#### 5. Update `js_fill` in `attempt_proxy_vote()`
+
+The `js_fill` block (~line 254) looks for fields by their `aria-label` or `placeholder`. Update the matching strings:
+
+```javascript
+// Current placeholders — update these:
+if (label.includes('company') || label.includes('organization')) {
+    // fills the company field
+}
+if (label.includes('use case') || label.includes('reason') || label.includes('details')) {
+    // fills the use case field
+}
+```
+
+If the fields use `name` attributes instead of `aria-label`/`placeholder`, change the selector logic:
+
+```javascript
+const label = (
+    input.getAttribute('aria-label') ||
+    input.getAttribute('placeholder') ||
+    input.getAttribute('name') ||        // <-- add this
+    ''
+).toLowerCase();
+```
+
+#### 6. Find the Submit Button
+
+Look for the button that submits the proxy vote. Common labels:
+- "Submit"
+- "Save"
+- "Add vote"
+- "Confirm"
+
+#### 7. Update `js_submit` in `attempt_proxy_vote()`
+
+Update the `js_submit` block (~line 296) to match:
+
+```javascript
+// Current placeholders — update these:
+if (text.includes('submit') || text.includes('save') || text.includes('add vote')) {
+    btn.click();
+    return true;
+}
+```
+
+#### 8. Test It
+
+```bash
+# Dry run first — verifies selectors without clicking
+cargo run --release -- --ids VCF-I-979 --company "Acme Corp" --use-case "Testing proxy"
+
+# If dry run looks good, go live
+cargo run --release -- --ids VCF-I-979 --live --company "Acme Corp" --use-case "Critical for compliance"
+```
+
+### Quick Reference: What Each JS Block Does
+
+| Block | Location | Purpose |
+|-------|----------|---------|
+| `js_open` | ~line 227 | Clicks the button that opens the proxy vote dialog |
+| `js_fill` | ~line 254 | Fills in company name and use case fields |
+| `js_submit` | ~line 296 | Clicks the submit/save button to confirm the proxy vote |
+
+### Tips
+
+- **Use Chrome DevTools Console** to test selectors live before editing code:
+  ```javascript
+  // Test if your button text match works:
+  document.querySelectorAll('button').forEach(b => console.log(b.textContent.trim()))
+  ```
+- **The tool always pauses before submitting** — you'll see the filled dialog and can review/edit before pressing ENTER
+- **If the proxy dialog doesn't exist** on your portal, the tool gracefully skips it and just votes normally
+- After updating selectors, run `cargo build --release` to recompile
+
+---
+
 ## Disclaimer
 
 This tool assists with **navigation and clicking**. It does not:
