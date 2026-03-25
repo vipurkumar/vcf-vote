@@ -138,19 +138,47 @@ pub async fn launch_browser() -> Result<(Browser, Page), Box<dyn std::error::Err
         builder = builder.chrome_executable(chrome_path);
     }
 
-    let (browser, mut handler) = Browser::launch(
-        builder
-            .build()
-            .map_err(|e| format!("Failed to build browser config: {}", e))?,
+    let config = builder
+        .build()
+        .map_err(|e| format!("Failed to build browser config: {}", e))?;
+
+    // On macOS, raw terminal mode can interfere with Chrome process spawning.
+    // Temporarily disable it for the launch, then re-enable.
+    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if was_raw {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+
+    // Launch with a timeout to avoid hanging forever
+    let launch_result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        Browser::launch(config),
     )
-    .await?;
+    .await
+    .map_err(|_| "Browser launch timed out after 30 seconds")?;
+
+    let (browser, mut handler) = launch_result?;
+
+    // Restore raw mode if it was active
+    if was_raw {
+        let _ = crossterm::terminal::enable_raw_mode();
+    }
 
     // Spawn the handler loop so CDP messages are processed
     tokio::spawn(async move {
         while let Some(_event) = handler.next().await {}
     });
 
-    let page = browser.new_page("about:blank").await?;
+    // Small delay to let Chrome fully initialize before creating a page
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    let page = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        browser.new_page("about:blank"),
+    )
+    .await
+    .map_err(|_| "Creating new page timed out after 15 seconds")??;
+
     Ok((browser, page))
 }
 
