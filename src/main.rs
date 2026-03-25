@@ -6,6 +6,7 @@ mod voter;
 
 use std::sync::{Arc, Mutex};
 
+use chromiumoxide::page::Page;
 use clap::Parser;
 use config::{Cli, Config};
 use tui::{AppPhase, AppState, SharedState};
@@ -47,12 +48,47 @@ async fn main() {
 // ── TUI mode ────────────────────────────────────────────────────────────────
 
 async fn run_with_tui(config: Config) {
+    // Step 1: Show disclaimer and launch browser BEFORE starting TUI
+    // (macOS can't spawn Chrome while terminal is in raw/alternate screen mode)
+    eprintln!("{}", DISCLAIMER);
+    eprintln!();
+    eprintln!("Mode:    {}", config.mode);
+    eprintln!("Dry run: {}", config.dry_run);
+    eprintln!("FRs:     {:?}", config.fr_ids);
+    eprintln!();
+
+    browser::human_pause(
+        "By pressing ENTER you confirm:\n\
+         1. You have permission to automate navigation on this portal\n\
+         2. You have read the relevant Terms of Use and policies\n\
+         3. You consent to the actions this tool will take on your behalf",
+    );
+
+    eprintln!("[init] Launching browser...");
+    let (_browser, page) = match browser::launch_browser().await {
+        Ok(bp) => bp,
+        Err(e) => {
+            eprintln!("Error launching browser: {}", e);
+            eprintln!("Make sure Chromium/Chrome is installed.");
+            std::process::exit(1);
+        }
+    };
+    eprintln!("[init] Browser ready. Starting TUI...");
+
+    // Step 2: Now start the TUI — browser is already running
     let state: SharedState = Arc::new(Mutex::new(AppState::new(
         &config.fr_ids,
         config.dry_run,
         &config.mode.to_string(),
         config.company.clone(),
     )));
+
+    // Skip disclaimer phase since we already handled it
+    {
+        let mut s = state.lock().unwrap();
+        s.phase = AppPhase::Auth;
+        s.log("Browser launched. Starting authentication...");
+    }
 
     let worker_state = state.clone();
     let tui_state = state.clone();
@@ -61,7 +97,7 @@ async fn run_with_tui(config: Config) {
         tui_result = tui::run_tui_loop(tui_state) => {
             tui_result.map_err(|e| format!("TUI error: {}", e))
         }
-        worker_result = run_worker(worker_state, config) => {
+        worker_result = run_worker(worker_state, config, page) => {
             worker_result
         }
     };
@@ -72,36 +108,8 @@ async fn run_with_tui(config: Config) {
     }
 }
 
-async fn run_worker(state: SharedState, config: Config) -> Result<(), String> {
-    // Wait for disclaimer acceptance
-    loop {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        if state.lock().unwrap().phase != AppPhase::Disclaimer {
-            break;
-        }
-        if state.lock().unwrap().should_quit {
-            return Ok(());
-        }
-    }
-
-    // Launch browser
-    state.lock().unwrap().log("Launching browser...");
-    let (_browser, page) = match browser::launch_browser().await {
-        Ok(bp) => bp,
-        Err(e) => {
-            let msg = format!("Error launching browser: {}. Make sure Chromium/Chrome is installed.", e);
-            state.lock().unwrap().log(format!("ERROR: {}", msg));
-            state.lock().unwrap().phase = AppPhase::Done;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            return Err(msg);
-        }
-    };
-
-    // Auth gate
-    {
-        state.lock().unwrap().phase = AppPhase::Auth;
-        state.lock().unwrap().log("Starting authentication...");
-    }
+async fn run_worker(state: SharedState, config: Config, page: Page) -> Result<(), String> {
+    // Auth gate (browser already launched)
     if let Err(e) = browser::auth_gate_tui(&page, &config, &state).await {
         let msg = format!("Error during authentication: {}", e);
         state.lock().unwrap().log(format!("ERROR: {}", msg));
